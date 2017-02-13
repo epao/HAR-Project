@@ -1,0 +1,116 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+# Practical Machine Learning - Course Project  
+## *Eric Pao*  
+  
+The goal of the project is to analyze _personal activity data_ for 6 participants and build a model to predict the manner in which they did the exercise. The data is from accelerometers worn on the belt, forearm, arm, and dumbbell for the 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways:  
+
+A. Exact/Correct Movement  
+B. Throwing Elbows to the Front  
+C. Lifting the Dumbbell Only Halfway  
+D. Lowering the Dumbbell Only Halfway  
+E. Throwing the Hips to the Front  
+
+```{r,echo = FALSE}
+#Set working directory
+
+if(getwd()!="C:/Users/epao2/Documents/Data Science/03 - Coursera/01 - Courses/06 - Practical Machine Learning/Course Project"){
+  setwd("C:/Users/epao2/Documents/Data Science/03 - Coursera/01 - Courses/06 - Practical Machine Learning/Course Project")
+}
+```
+
+### Data Loading  
+The first step would be to load the data. The data was already split into training and test sets that we can load as data frames into R.
+```{r}
+
+# Load Training Data
+if(!exists("pml_training)")) {
+  pml_training <- read.csv("pml-training.csv",header=TRUE,na.strings=c("","NA"),row.names=1)
+}
+
+# Load Testing Data
+if(!exists("pml_testing")) {
+  pml_testing <- read.csv("pml-testing.csv",header=TRUE,na.strings=c("","NA"),row.names=1)
+}
+
+```
+
+For a simple QC, we should ensure the structure of both files are the same. Specifically, we check whether the column names are the same between both data sets. As shown below, we see that the test and training data sets contain the same features (with the exception of the training set including a variable for "classe" and the test set including the problem ID).
+
+```{r}
+# QC to make sure column names are same
+training_names <- names(pml_training)
+testing_names <- names(pml_testing)
+
+# Which column names are different
+training_names[which(training_names != testing_names)]
+testing_names[which(training_names != testing_names)]
+```
+
+### Data Preprocessing  
+In this section, we want to prep the data for modeling by removing erroneous features from the data, especially since we currently have __158 possible predictors__ in the data. If we look at the list of features, we notice there are a few that will most likely _not_ play a role in predicting the class of activity, namely the __timestamp__ and __new window__ variables.  
+  
+We then want to check for the prevalence of __missing values or NAs__ in the training data. As shown below, we see that there are 100 features that contain a significant proportion of NAs in each. Specifically, over __98% of values in these 100 features are missing or NA!__  
+  
+The code below removes the irrelevant features (i.e. timestamp, window) and the features with majority missing values. This will cull down the number of available features for us to consider when modeling and reduce complexity significantly. What we're left with is a dataset with 53 features that we model in the next section.
+
+```{r}
+# Timestamp, window shouldn't impact prediction
+invalid <- grepl("timestamp|window",training_names)
+clean_training <- pml_training[,!invalid]
+clean_testing <- pml_testing[,!invalid]
+
+# Check for columns with nas #
+colNAs <- colSums(is.na(clean_training))
+#unique(colNAs)
+#sum(colNAs>0)
+#unique(colNAs/nrow(pml_training))
+
+# Identify column names in training dataset with NA values
+na_names <- names(colNAs[colNAs!=0])
+
+# Drop relevant columns in test and training set
+clean_training <- clean_training[,!(names(clean_training) %in% na_names)]
+clean_testing <- clean_testing[,!(names(clean_testing) %in% na_names)]
+```
+
+### Data Modeling  
+Among the options of classification models, __Random Forests__ provide the benefits of bagged decision trees (i.e. reducing variance of single trees) while decorrelating the trees by minimizing the number of predictors available at each split. By default, Random Forests only allow for a subset of $m=\sqrt{p}$ predictors to be chosen at each split. This leads to a reduction in bias and OOB error. 
+
+Using a Random Forest routine also __eliminates the need for an explicit cross-validation step__. This is because the bagged trees area already fit repeatedly to bootstrapped subsets of the given observations. On average, approximately __2/3rds__ of the observations are used in each bagged tree.
+
+We can use the __RandomForest__ library to fit a random forest model using the preprocessed training data from the previous step.
+
+```{r}
+set.seed(12345)
+library(randomForest)
+rf.activity <- randomForest(classe~.,data=clean_training,importance=TRUE)
+```
+
+As you can see below, we grew a large number of 500 trees and limited the number of variables at each split to be 7. The Random Forest routine compared the predictor with the set of observations not used in generating the bagged trees (i.e. Out-of-Bag Observations).
+
+In looking at the results, the model fit seems fairly accurrate, with an __OOB error rate of 0.29%__. 
+
+```{r,echo=FALSE}
+rf.activity
+```
+
+We can also take a look at the __Variable Importance Measures__ to interpret our model. As you can see below, the __roll_belt__ feature has the largest mean decrease in Gini Index. In other words, removing roll_belt would drastically increase the node impurity, making it the most important variable across all the bagged trees in our random forest. 
+
+```{r fig.width=7, fig.height=6,echo=FALSE}
+varImpPlot(rf.activity,type=2,n.var=10,main="Variable Importance Plot (Top 10)")
+```
+
+### Predicting our Test Cases
+We'll now want to complete the assignment by predicting the classes for our test data set.
+
+```{r}
+pred.activity <- predict(rf.activity,clean_testing,type="class")
+pred.activity
+```
+
+### Data Source
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
